@@ -920,3 +920,23 @@ class EnhancedDataManager:
         except Exception as e:
             logger.error(f"Error in legacy screen enhanced stocks: {e}")
             return []
+
+    def get_stock_data(self, symbol: str, validate: bool = False):
+        """
+        Synchronous wrapper for getting enhanced stock data.
+        This method allows synchronous code to fetch stock data.
+        
+        Args:
+            symbol: Stock symbol
+            validate: Whether to validate the data
+            
+        Returns:
+            StockData object or None if not found
+        """
+        import asyncio
+        try:
+            # Run the async method synchronously
+            return asyncio.run(self.get_enhanced_stock_data(symbol, validate=validate))
+        except Exception as e:
+            logger.error(f"Error getting stock data for {symbol}: {e}")
+            return None
