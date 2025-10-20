@@ -1,0 +1,77 @@
+# Enhanced ML AI Trading System Requirements with Confidence Boosting
+# Core dependencies
+pandas>=2.0.0
+numpy>=1.24.0
+yfinance>=0.2.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# Database
+sqlalchemy>=2.0.0
+
+# Data validation
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Visualization
+matplotlib>=3.7.0
+plotly>=5.17.0
+
+# Logging and monitoring
+loguru>=0.7.0
+
+# API and HTTP
+httpx>=0.24.0
+
+# Date/time handling
+python-dateutil>=2.8.0
+
+# Enhanced Machine Learning with Calibration
+scikit-learn>=1.3.0
+xgboost>=1.7.0
+
+# Technical Indicators Enhancement
+pandas-ta>=0.3.14b
+TA-Lib>=0.4.25
+ta>=0.11.0
+
+# Bayesian Methods
+pymc>=5.9.0
+arviz>=0.16.0
+
+# Backtesting Frameworks
+backtrader>=1.9.78.123
+bt>=0.2.9
+vectorbt>=0.25.2
+
+# Sentiment Analysis & NLP
+transformers>=4.35.0
+torch>=2.1.0
+vaderSentiment>=3.3.2
+textblob>=0.17.1
+
+# News APIs
+newsapi-python>=0.2.7
+alpha-vantage>=2.3.1
+
+# Performance Analytics
+scipy>=1.11.0
+statsmodels>=0.14.0
+
+# Ensemble Methods
+lightgbm>=4.1.0
+catboost>=1.2.0
+
+# Configuration
+click>=8.1.0
+
+# Real-time Data
+websocket-client>=1.6.0
+asyncio>=3.4.3
+
+# Kalman Filters for Dynamic Beta
+pykalman>=0.9.5
+
+# Additional utilities
+joblib>=1.3.0
+tqdm>=4.66.0
