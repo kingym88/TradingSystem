@@ -940,3 +940,4 @@ class EnhancedDataManager:
         except Exception as e:
             logger.error(f"Error getting stock data for {symbol}: {e}")
             return None
+
