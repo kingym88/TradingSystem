@@ -1,6 +1,6 @@
 """
 Enhanced ML Engine for Two-Stage Stock Analysis System
-UPDATED: Integrates with 4000 → 50 → 10 filtering approach
+UPDATED: Added sell price recommendations and portfolio stock handling
 """
 import pandas as pd
 import numpy as np
@@ -23,15 +23,15 @@ try:
     logger.info("✅ scikit-learn imported successfully")
 except ImportError:
     HAS_SKLEARN = False
-    logger.warning("⚠️  scikit-learn not available. Using basic ML methods.")
+    logger.warning("⚠️ scikit-learn not available. Using basic ML methods.")
 
 try:
     import xgboost as xgb
     HAS_XGBOOST = True
-    logger.info("✅ XGBoost imported successfully") 
+    logger.info("✅ XGBoost imported successfully")   
 except ImportError:
     HAS_XGBOOST = False
-    logger.warning("⚠️  XGBoost not available.")
+    logger.warning("⚠️ XGBoost not available.")
 
 # Bayesian methods
 try:
@@ -39,7 +39,7 @@ try:
     HAS_SCIPY = True
 except ImportError:
     HAS_SCIPY = False
-    logger.warning("⚠️  SciPy not available. Bayesian methods disabled.")
+    logger.warning("⚠️ SciPy not available. Bayesian methods disabled.")
 
 try:
     from two_stage_config import get_config
@@ -56,11 +56,15 @@ except ImportError:
         ENABLE_BAYESIAN_UPDATING = True
         BAYESIAN_PRIOR_ALPHA = 5.0
         BAYESIAN_PRIOR_BETA = 5.0
+        MAX_DAILY_LOSS = 0.05  # 5% daily loss limit
+        STOP_LOSS_PERCENTAGE = 0.15  # 15% stop loss
     
     config = FallbackMLConfig()
 
 from database import get_db_manager
 from two_stage_data_manager import get_two_stage_data_manager, run_two_stage_stock_analysis
+from portfolio_manager import get_portfolio_manager
+
 
 class TwoStageBayesianUpdater:
     """Bayesian belief updating optimized for two-stage analysis"""
@@ -69,7 +73,7 @@ class TwoStageBayesianUpdater:
         self.config = config
         self.prior_alpha = getattr(config, 'BAYESIAN_PRIOR_ALPHA', 5.0)
         self.prior_beta = getattr(config, 'BAYESIAN_PRIOR_BETA', 5.0)
-        
+    
     def update_confidence_from_trades(self, base_confidence: float, 
                                     recent_wins: int, recent_total: int) -> float:
         """Update confidence using Bayesian methods"""
@@ -100,7 +104,7 @@ class TwoStageBayesianUpdater:
                         f"Final: {final_confidence:.3f}")
             
             return min(0.95, max(0.1, final_confidence))
-            
+        
         except Exception as e:
             logger.error(f"Error in Bayesian confidence update: {e}")
             return base_confidence
@@ -122,20 +126,23 @@ class TwoStageBayesianUpdater:
             upper = min(1, center + margin)
             
             return (lower, upper)
-            
+        
         except Exception as e:
             logger.error(f"Error calculating confidence interval: {e}")
             return (0.0, 1.0)
 
+
 class TwoStageMLRecommendationEngine:
     """
     ML Recommendation Engine optimized for two-stage stock analysis
+    UPDATED: Added sell price recommendations and portfolio stock detection
     """
     
     def __init__(self):
         self.config = config
         self.db_manager = get_db_manager()
         self.data_manager = get_two_stage_data_manager()
+        self.portfolio_manager = get_portfolio_manager()
         self.bayesian_updater = TwoStageBayesianUpdater()
         
         # Model components
@@ -143,12 +150,46 @@ class TwoStageMLRecommendationEngine:
         self.last_training_date = None
         
         logger.info("🚀 Two-Stage ML Recommendation Engine initialized")
+    
+    def calculate_sell_price(self, current_price: float, avg_buy_price: float = None) -> float:
+        """
+        Calculate recommended sell price based on daily loss limits
+        Uses MAX_DAILY_LOSS from config
+        """
+        try:
+            # Get max daily loss from config (default 5%)
+            max_daily_loss = getattr(self.config, 'MAX_DAILY_LOSS', 0.05)
+            
+            # If we have average buy price, calculate sell price from buy price
+            if avg_buy_price is not None:
+                # Sell at stop loss level below average buy price
+                stop_loss_percent = getattr(self.config, 'STOP_LOSS_PERCENTAGE', 0.15)
+                sell_price = avg_buy_price * (1 - stop_loss_percent)
+            else:
+                # Use current price minus daily loss limit
+                sell_price = current_price * (1 - max_daily_loss)
+            
+            return round(sell_price, 2)
         
+        except Exception as e:
+            logger.error(f"Error calculating sell price: {e}")
+            # Fallback: 5% below current price
+            return round(current_price * 0.95, 2)
+    
     async def generate_recommendations(self, max_recommendations: int = None) -> List[Dict[str, Any]]:
-        """Generate recommendations using two-stage analysis"""
+        """
+        UPDATED: Generate recommendations split into new stocks and portfolio stocks
+        """
         try:
             max_recs = max_recommendations or getattr(self.config, 'MAX_DAILY_RECOMMENDATIONS', 10)
             logger.info(f"🎯 Generating {max_recs} recommendations using two-stage analysis...")
+            
+            # Get current portfolio
+            portfolio = self.portfolio_manager.get_portfolio_summary()
+            portfolio_symbols = set(portfolio['holdings'].keys())
+            holdings_details = portfolio['holdings_details']
+            
+            logger.info(f"📊 Current portfolio has {len(portfolio_symbols)} positions: {portfolio_symbols}")
             
             # Get trade history for learning
             trade_history = self.db_manager.get_trade_history(days=365)
@@ -157,19 +198,96 @@ class TwoStageMLRecommendationEngine:
             min_samples = getattr(self.config, 'MIN_TRAINING_SAMPLES', 20)
             if trade_history.empty or len(trade_history) < min_samples:
                 logger.info("Using two-stage analysis without historical learning")
-                return await self._generate_two_stage_recommendations(max_recs)
+                base_recommendations = await self._generate_two_stage_recommendations(max_recs * 2)  # Get more to split
+            else:
+                # Generate recommendations with Bayesian enhancement
+                base_recommendations = await self._generate_two_stage_recommendations(max_recs * 2)
+                
+                # Enhance with Bayesian learning from trade history
+                base_recommendations = self._enhance_with_bayesian_learning(
+                    base_recommendations, trade_history
+                )
             
-            # Generate recommendations with Bayesian enhancement
-            base_recommendations = await self._generate_two_stage_recommendations(max_recs)
+            # SPLIT RECOMMENDATIONS: Portfolio stocks vs New stocks
+            portfolio_recommendations = []
+            new_stock_recommendations = []
             
-            # Enhance with Bayesian learning from trade history
-            enhanced_recommendations = self._enhance_with_bayesian_learning(
-                base_recommendations, trade_history
-            )
+            for rec in base_recommendations:
+                symbol = rec['symbol']
+                
+                # Add sell price to all recommendations
+                current_price = rec.get('current_price', 0)
+                
+                if symbol in portfolio_symbols:
+                    # Stock is in portfolio - analyze for BUY or SELL
+                    position_details = holdings_details.get(symbol, {})
+                    avg_buy_price = position_details.get('avg_buy_price', current_price)
+                    current_value = position_details.get('current_value', 0)
+                    unrealized_pnl_percent = position_details.get('unrealized_pnl_percent', 0)
+                    
+                    # Calculate sell price based on average buy price
+                    sell_price = self.calculate_sell_price(current_price, avg_buy_price)
+                    
+                    # Determine action: BUY more or SELL
+                    if current_price > avg_buy_price:
+                        # Stock is profitable - recommend SELL if target reached
+                        if unrealized_pnl_percent > 15:  # 15% profit target
+                            action = 'SELL'
+                            reasoning = f"Take profit: Currently ${current_price:.2f}, bought at ${avg_buy_price:.2f} ({unrealized_pnl_percent:+.1f}% gain). Target sell price: ${sell_price:.2f}"
+                        else:
+                            action = 'HOLD'
+                            reasoning = f"Hold position: Currently ${current_price:.2f}, bought at ${avg_buy_price:.2f} ({unrealized_pnl_percent:+.1f}% gain). Sell if drops to ${sell_price:.2f}"
+                    elif current_price < avg_buy_price * 0.95:
+                        # Stock is down 5%+ - check if still good buy
+                        if rec.get('confidence', 0) > 0.75:
+                            action = 'BUY'
+                            reasoning = f"Average down: Currently ${current_price:.2f}, bought at ${avg_buy_price:.2f} ({unrealized_pnl_percent:+.1f}% loss). Strong technical signals suggest recovery. Stop loss: ${sell_price:.2f}"
+                        else:
+                            action = 'SELL'
+                            reasoning = f"Cut losses: Currently ${current_price:.2f}, bought at ${avg_buy_price:.2f} ({unrealized_pnl_percent:+.1f}% loss). Weak signals suggest further decline. Sell at ${sell_price:.2f}"
+                    else:
+                        # Near break-even
+                        action = 'HOLD'
+                        reasoning = f"Monitor position: Currently ${current_price:.2f}, bought at ${avg_buy_price:.2f} ({unrealized_pnl_percent:+.1f}%). Set stop loss at ${sell_price:.2f}"
+                    
+                    portfolio_rec = {
+                        **rec,
+                        'action': action,
+                        'sell_price': sell_price,
+                        'avg_buy_price': avg_buy_price,
+                        'current_position_size': position_details.get('quantity', 0),
+                        'unrealized_pnl': position_details.get('unrealized_pnl', 0),
+                        'unrealized_pnl_percent': unrealized_pnl_percent,
+                        'reasoning': reasoning,
+                        'is_portfolio_stock': True
+                    }
+                    
+                    # Only include actionable recommendations (skip HOLD for display)
+                    if action in ['BUY', 'SELL']:
+                        portfolio_recommendations.append(portfolio_rec)
+                else:
+                    # New stock - recommend BUY with sell price
+                    sell_price = self.calculate_sell_price(current_price)
+                    
+                    new_stock_rec = {
+                        **rec,
+                        'action': 'BUY',
+                        'sell_price': sell_price,
+                        'reasoning': rec.get('reasoning', '') + f" Set stop loss at ${sell_price:.2f}",
+                        'is_portfolio_stock': False
+                    }
+                    
+                    new_stock_recommendations.append(new_stock_rec)
             
-            logger.info(f"✅ Generated {len(enhanced_recommendations)} enhanced recommendations")
-            return enhanced_recommendations[:max_recs]
+            # Combine recommendations: prioritize portfolio actions, then new stocks
+            final_recommendations = portfolio_recommendations + new_stock_recommendations
+            final_recommendations = final_recommendations[:max_recs]
             
+            logger.info(f"✅ Split recommendations: {len(portfolio_recommendations)} portfolio stocks, {len(new_stock_recommendations)} new stocks")
+            logger.info(f"📊 Returning {len(final_recommendations)} total recommendations")
+            
+            return final_recommendations
+        
         except Exception as e:
             logger.error(f"Error generating recommendations: {e}")
             return []
@@ -211,13 +329,13 @@ class TwoStageMLRecommendationEngine:
                     })
                     
                     enhanced_recs.append(enhanced_rec)
-                    
+                
                 except Exception as e:
                     logger.error(f"Error enhancing recommendation for {rec.get('symbol', 'UNKNOWN')}: {e}")
                     enhanced_recs.append(rec)  # Use original if enhancement fails
             
             return enhanced_recs
-            
+        
         except Exception as e:
             logger.error(f"Error in two-stage recommendations: {e}")
             return []
@@ -270,7 +388,7 @@ class TwoStageMLRecommendationEngine:
                 boost += 0.02
             
             return min(0.25, max(0.0, boost))  # Cap at 25% boost
-            
+        
         except Exception as e:
             logger.error(f"Error calculating ML confidence boost: {e}")
             return 0.0
@@ -305,7 +423,7 @@ class TwoStageMLRecommendationEngine:
                 return "Moderate"
             else:
                 return "Weak"
-                
+        
         except Exception as e:
             logger.error(f"Error assessing technical strength: {e}")
             return "Unknown"
@@ -323,7 +441,7 @@ class TwoStageMLRecommendationEngine:
                 return "C"
             else:
                 return "D"
-                
+        
         except Exception as e:
             logger.error(f"Error assessing liquidity grade: {e}")
             return "Unknown"
@@ -341,13 +459,13 @@ class TwoStageMLRecommendationEngine:
                 return "Weak"
             else:
                 return "Minimal"
-                
+        
         except Exception as e:
             logger.error(f"Error assessing momentum grade: {e}")
             return "Unknown"
     
     def _enhance_with_bayesian_learning(self, recommendations: List[Dict], 
-                                      trade_history: pd.DataFrame) -> List[Dict]:
+                                       trade_history: pd.DataFrame) -> List[Dict]:
         """Enhance recommendations with Bayesian learning from trade history"""
         try:
             if trade_history.empty:
@@ -392,13 +510,13 @@ class TwoStageMLRecommendationEngine:
                     else:
                         # Not enough similar trades, use original
                         enhanced_recs.append(rec)
-                        
+                
                 except Exception as e:
                     logger.error(f"Error enhancing {rec.get('symbol', 'UNKNOWN')} with Bayesian learning: {e}")
                     enhanced_recs.append(rec)
             
             return enhanced_recs
-            
+        
         except Exception as e:
             logger.error(f"Error in Bayesian enhancement: {e}")
             return recommendations
@@ -422,7 +540,7 @@ class TwoStageMLRecommendationEngine:
             similar_trades = trade_history.head(10)  # Placeholder
             
             return similar_trades
-            
+        
         except Exception as e:
             logger.error(f"Error finding similar trades: {e}")
             return pd.DataFrame()
@@ -446,7 +564,7 @@ class TwoStageMLRecommendationEngine:
                 self._update_bayesian_priors(trade_history)
             
             logger.info("✅ Learning from trades completed")
-            
+        
         except Exception as e:
             logger.error(f"Error learning from trades: {e}")
     
@@ -470,7 +588,7 @@ class TwoStageMLRecommendationEngine:
             if 'symbol' in trade_history.columns:
                 top_symbols = trade_history['symbol'].value_counts().head(5)
                 logger.info(f"Most traded symbols: {list(top_symbols.index)}")
-            
+        
         except Exception as e:
             logger.error(f"Error analyzing trade patterns: {e}")
     
@@ -480,7 +598,7 @@ class TwoStageMLRecommendationEngine:
             # This would update the prior beliefs based on actual trade outcomes
             # For now, just log that we would do this
             logger.info("📈 Bayesian priors updated based on trade history")
-            
+        
         except Exception as e:
             logger.error(f"Error updating Bayesian priors: {e}")
     
@@ -497,8 +615,11 @@ class TwoStageMLRecommendationEngine:
             'scipy_available': HAS_SCIPY,
             'last_training_date': self.last_training_date,
             'confidence_threshold': getattr(self.config, 'CONFIDENCE_THRESHOLD', 0.89),
-            'min_confidence_for_trade': getattr(self.config, 'MIN_CONFIDENCE_FOR_TRADE', 0.65)
+            'min_confidence_for_trade': getattr(self.config, 'MIN_CONFIDENCE_FOR_TRADE', 0.65),
+            'max_daily_loss': getattr(self.config, 'MAX_DAILY_LOSS', 0.05),
+            'stop_loss_percentage': getattr(self.config, 'STOP_LOSS_PERCENTAGE', 0.15)
         }
+
 
 # Main interface functions
 def get_two_stage_ml_engine() -> TwoStageMLRecommendationEngine:
