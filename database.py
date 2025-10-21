@@ -1,7 +1,7 @@
 """
 Database management system for AI Trading System
+UPDATED: Added helper methods for portfolio tracking
 """
-
 from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, Boolean, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -9,14 +9,17 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 import pandas as pd
 from loguru import logger
+
 from two_stage_config import get_config
 
 config = get_config()
+
 Base = declarative_base()
+
 
 class Portfolio(Base):
     __tablename__ = 'portfolio'
-
+    
     id = Column(Integer, primary_key=True)
     total_value = Column(Float, nullable=False)
     cash = Column(Float, nullable=False)
@@ -26,9 +29,10 @@ class Portfolio(Base):
     num_positions = Column(Integer, nullable=False)
     timestamp = Column(DateTime, default=datetime.now)
 
+
 class Position(Base):
     __tablename__ = 'positions'
-
+    
     id = Column(Integer, primary_key=True)
     symbol = Column(String(10), nullable=False)
     quantity = Column(Integer, nullable=False)
@@ -43,9 +47,10 @@ class Position(Base):
     last_updated = Column(DateTime, default=datetime.now)
     is_active = Column(Boolean, default=True)
 
+
 class Trade(Base):
     __tablename__ = 'trades'
-
+    
     id = Column(Integer, primary_key=True)
     symbol = Column(String(10), nullable=False)
     action = Column(String(10), nullable=False)
@@ -59,9 +64,10 @@ class Trade(Base):
     portfolio_value_before = Column(Float)
     portfolio_value_after = Column(Float)
 
+
 class AIRecommendation(Base):
     __tablename__ = 'ai_recommendations'
-
+    
     id = Column(Integer, primary_key=True)
     symbol = Column(String(10), nullable=False)
     action = Column(String(10), nullable=False)
@@ -75,32 +81,35 @@ class AIRecommendation(Base):
     executed = Column(Boolean, default=False)
     timestamp = Column(DateTime, default=datetime.now)
 
+
 class DatabaseManager:
     def __init__(self):
         self.engine = create_engine(config.DATABASE_URL, echo=False)
         Base.metadata.create_all(self.engine)
         self.SessionLocal = sessionmaker(bind=self.engine)
-
+    
     def get_session(self) -> Session:
         return self.SessionLocal()
-
+    
     def save_portfolio_snapshot(self, portfolio_data: Dict[str, Any]) -> None:
         try:
             # Filter only valid Portfolio columns
             valid_keys = ['total_value', 'cash', 'invested_amount', 'total_return', 'daily_pnl', 'num_positions', 'timestamp']
             filtered_data = {k: v for k, v in portfolio_data.items() if k in valid_keys}
-
+            
             if 'timestamp' not in filtered_data:
                 filtered_data['timestamp'] = datetime.now()
-
+            
             with self.get_session() as session:
                 portfolio = Portfolio(**filtered_data)
                 session.add(portfolio)
                 session.commit()
-                logger.info("Portfolio snapshot saved")
+            
+            logger.info("Portfolio snapshot saved")
+        
         except Exception as e:
             logger.error(f"Error saving portfolio snapshot: {e}")
-
+    
     def save_trade(self, trade_data: Dict[str, Any]) -> None:
         try:
             with self.get_session() as session:
@@ -109,7 +118,7 @@ class DatabaseManager:
                 session.commit()
         except Exception as e:
             logger.error(f"Error saving trade: {e}")
-
+    
     def save_ai_recommendation(self, recommendation_data: Dict[str, Any]) -> None:
         try:
             with self.get_session() as session:
@@ -118,7 +127,7 @@ class DatabaseManager:
                 session.commit()
         except Exception as e:
             logger.error(f"Error saving recommendation: {e}")
-
+    
     def get_active_positions(self) -> List[Position]:
         try:
             with self.get_session() as session:
@@ -126,49 +135,54 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting positions: {e}")
             return []
-
+    
     def get_portfolio_history(self, days: int = 30) -> pd.DataFrame:
         try:
             with self.get_session() as session:
                 cutoff_date = datetime.now() - pd.Timedelta(days=days)
                 query = session.query(Portfolio).filter(Portfolio.timestamp >= cutoff_date)
+                
                 data = [
                     {'timestamp': p.timestamp, 'total_value': p.total_value, 'cash': p.cash,
                      'invested_amount': p.invested_amount, 'total_return': p.total_return,
                      'daily_pnl': p.daily_pnl, 'num_positions': p.num_positions}
                     for p in query.all()
                 ]
-
+                
                 return pd.DataFrame(data)
+        
         except Exception as e:
             logger.error(f"Error getting portfolio history: {e}")
             return pd.DataFrame()
-
+    
     def get_trade_history(self, days: int = 30) -> pd.DataFrame:
         try:
             with self.get_session() as session:
                 cutoff_date = datetime.now() - pd.Timedelta(days=days)
                 query = session.query(Trade).filter(Trade.timestamp >= cutoff_date)
+                
                 data = [
                     {'timestamp': t.timestamp, 'symbol': t.symbol, 'action': t.action,
                      'quantity': t.quantity, 'price': t.price, 'total_amount': t.total_amount,
                      'reasoning': t.reasoning, 'confidence': t.confidence}
                     for t in query.all()
                 ]
-
+                
                 return pd.DataFrame(data)
+        
         except Exception as e:
             logger.error(f"Error getting trade history: {e}")
             return pd.DataFrame()
-
+    
     def get_all_trades(self) -> List[Dict[str, Any]]:
         """
-        ADDED: Get all trades from the database (no date limit)
-        Returns list of dictionaries instead of SQLAlchemy objects for easier processing
+        Get all trades from the database (no date limit)
+        Returns list of dictionaries for easier processing
         """
         try:
             with self.get_session() as session:
                 trades = session.query(Trade).order_by(Trade.timestamp).all()
+                
                 trade_list = []
                 for t in trades:
                     trade_dict = {
@@ -186,33 +200,63 @@ class DatabaseManager:
                         'portfolio_value_after': t.portfolio_value_after
                     }
                     trade_list.append(trade_dict)
-
+                
                 logger.info(f"Retrieved {len(trade_list)} trades from database")
                 return trade_list
-
+        
         except Exception as e:
             logger.error(f"Error getting all trades: {e}")
             return []
-
+    
+    def get_trades_by_symbol(self, symbol: str) -> List[Dict[str, Any]]:
+        """
+        ADDED: Get all trades for a specific symbol
+        Useful for calculating average buy price
+        """
+        try:
+            with self.get_session() as session:
+                trades = session.query(Trade).filter(Trade.symbol == symbol).order_by(Trade.timestamp).all()
+                
+                trade_list = []
+                for t in trades:
+                    trade_dict = {
+                        'id': t.id,
+                        'symbol': t.symbol,
+                        'action': t.action,
+                        'quantity': t.quantity,
+                        'price': t.price,
+                        'total_amount': t.total_amount,
+                        'timestamp': t.timestamp
+                    }
+                    trade_list.append(trade_dict)
+                
+                return trade_list
+        
+        except Exception as e:
+            logger.error(f"Error getting trades for {symbol}: {e}")
+            return []
+    
     def update_trade_portfolio_value_after(self, timestamp: datetime, portfolio_value: float) -> None:
         """
-        ADDED: Update the portfolio_value_after field for a specific trade
+        Update the portfolio_value_after field for a specific trade
         """
         try:
             with self.get_session() as session:
                 trade = session.query(Trade).filter(Trade.timestamp == timestamp).first()
+                
                 if trade:
                     trade.portfolio_value_after = portfolio_value
                     session.commit()
                     logger.debug(f"Updated portfolio value after for trade at {timestamp}")
                 else:
                     logger.warning(f"Trade not found for timestamp {timestamp}")
+        
         except Exception as e:
             logger.error(f"Error updating trade portfolio value: {e}")
-
+    
     def calculate_performance_metrics(self) -> Dict[str, float]:
         return {'total_return': 0.0, 'sharpe_ratio': 0.0}
-
+    
     def get_unexecuted_recommendations(self) -> List[AIRecommendation]:
         try:
             with self.get_session() as session:
@@ -220,7 +264,9 @@ class DatabaseManager:
         except Exception as e:
             return []
 
+
 db_manager = DatabaseManager()
+
 
 def get_db_manager() -> DatabaseManager:
     return db_manager
