@@ -1,25 +1,55 @@
 # portfolio_manager.py
 """
 Portfolio Management Module for Two-Stage Trading System
-Separated to avoid circular imports with trade_logger.py
+UPDATED: Added live price tracking and current portfolio value calculations
 """
-
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 from loguru import logger
+import yfinance as yf
+
 from database import get_db_manager
 from two_stage_config import get_config
 
 config = get_config()
 
-
 class TwoStagePortfolioManager:
-    """Portfolio management optimized for two-stage analysis"""
+    """Portfolio management optimized for two-stage analysis with live price tracking"""
     
     def __init__(self):
         self.db_manager = get_db_manager()
         self.config = config
         self.initial_capital = config.INITIAL_CAPITAL
+        self._price_cache = {}  # Cache for live prices
+    
+    def get_live_price(self, symbol: str) -> Optional[float]:
+        """
+        Fetch current live price from Yahoo Finance
+        """
+        try:
+            ticker = yf.Ticker(symbol)
+            # Get current price from info or recent history
+            try:
+                current_price = ticker.info.get('currentPrice') or ticker.info.get('regularMarketPrice')
+                if current_price:
+                    self._price_cache[symbol] = current_price
+                    return float(current_price)
+            except:
+                pass
+            
+            # Fallback: get from recent history
+            hist = ticker.history(period="1d")
+            if not hist.empty:
+                current_price = float(hist['Close'].iloc[-1])
+                self._price_cache[symbol] = current_price
+                return current_price
+            
+            logger.warning(f"Could not fetch live price for {symbol}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error fetching live price for {symbol}: {e}")
+            return None
     
     def get_enhanced_kelly_position_size(self, price: float, expected_return: float, 
                                        confidence: float, portfolio_value: float) -> float:
@@ -50,13 +80,73 @@ class TwoStagePortfolioManager:
                 logger.info(f"Two-Stage Simplified: {simplified_fraction:.1%} of portfolio")
             
             return max(0, position_size)
-            
+        
         except Exception as e:
             logger.error(f"Error in two-stage Kelly sizing: {e}")
             return 0.0
     
+    def calculate_position_metrics(self, symbol: str, trades: List[Dict]) -> Dict[str, Any]:
+        """
+        Calculate detailed metrics for a position including average buy price and current value
+        """
+        try:
+            # Filter trades for this symbol
+            symbol_trades = [t for t in trades if t['symbol'] == symbol]
+            
+            if not symbol_trades:
+                return None
+            
+            # Calculate total shares and weighted average price
+            total_shares = 0
+            total_cost = 0.0
+            
+            for trade in symbol_trades:
+                if trade['action'] == 'BUY':
+                    total_shares += trade['quantity']
+                    total_cost += trade['total_amount']
+                elif trade['action'] == 'SELL':
+                    total_shares -= trade['quantity']
+                    # Reduce cost basis proportionally
+                    if total_shares > 0:
+                        sell_ratio = trade['quantity'] / (total_shares + trade['quantity'])
+                        total_cost -= (total_cost * sell_ratio)
+            
+            if total_shares <= 0:
+                return None
+            
+            avg_buy_price = total_cost / total_shares
+            
+            # Get current live price
+            current_price = self.get_live_price(symbol)
+            
+            if current_price is None:
+                # Fallback to last trade price
+                current_price = symbol_trades[-1]['price']
+                logger.warning(f"Using last trade price for {symbol}: ${current_price:.2f}")
+            
+            current_value = total_shares * current_price
+            unrealized_pnl = current_value - total_cost
+            unrealized_pnl_percent = (unrealized_pnl / total_cost * 100) if total_cost > 0 else 0
+            
+            return {
+                'symbol': symbol,
+                'quantity': total_shares,
+                'avg_buy_price': avg_buy_price,
+                'current_price': current_price,
+                'cost_basis': total_cost,
+                'current_value': current_value,
+                'unrealized_pnl': unrealized_pnl,
+                'unrealized_pnl_percent': unrealized_pnl_percent
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating position metrics for {symbol}: {e}")
+            return None
+    
     def get_portfolio_summary(self) -> Dict[str, Any]:
-        """Get current portfolio summary"""
+        """
+        UPDATED: Get current portfolio summary with live prices from Yahoo Finance
+        """
         try:
             trades = self.db_manager.get_all_trades()
             
@@ -65,21 +155,23 @@ class TwoStagePortfolioManager:
                     'total_value': self.config.INITIAL_CAPITAL,
                     'cash': self.config.INITIAL_CAPITAL,
                     'invested_amount': 0.0,
+                    'current_market_value': 0.0,
                     'holdings': {},
+                    'holdings_details': {},
                     'total_return': 0.0,
+                    'total_return_dollars': 0.0,
                     'num_positions': 0
                 }
             
-            # Calculate portfolio from all trades
+            # Calculate cash position from all trades
             cash = self.config.INITIAL_CAPITAL
-            holdings = {}
+            holdings = {}  # symbol -> quantity
             
             for trade in sorted(trades, key=lambda x: x.get('timestamp', datetime.min)):
                 symbol = trade['symbol']
                 action = trade['action']
                 quantity = trade['quantity']
-                price = trade['price']
-                total_amount = quantity * price
+                total_amount = trade['total_amount']
                 
                 if action == 'BUY':
                     cash -= total_amount
@@ -90,34 +182,51 @@ class TwoStagePortfolioManager:
                     if holdings[symbol] <= 0:
                         holdings.pop(symbol, None)
             
-            # Calculate current market value (simplified)
-            invested_amount = 0.0
-            for symbol, qty in holdings.items():
-                if qty > 0:
-                    # Use last trade price as approximation
-                    last_price = next((t['price'] for t in reversed(trades) if t['symbol'] == symbol), 0)
-                    invested_amount += qty * last_price
+            # Calculate current market value with live prices
+            holdings_details = {}
+            total_market_value = 0.0
+            total_cost_basis = 0.0
             
-            total_value = cash + invested_amount
-            total_return = ((total_value - self.config.INITIAL_CAPITAL) / self.config.INITIAL_CAPITAL) * 100
+            active_symbols = [s for s, q in holdings.items() if q > 0]
+            
+            for symbol in active_symbols:
+                position_metrics = self.calculate_position_metrics(symbol, trades)
+                
+                if position_metrics:
+                    holdings_details[symbol] = position_metrics
+                    total_market_value += position_metrics['current_value']
+                    total_cost_basis += position_metrics['cost_basis']
+            
+            # Calculate total portfolio value
+            total_value = cash + total_market_value
+            
+            # Calculate returns
+            total_return_dollars = total_value - self.config.INITIAL_CAPITAL
+            total_return_percent = (total_return_dollars / self.config.INITIAL_CAPITAL) * 100
             
             return {
                 'total_value': total_value,
                 'cash': cash,
-                'invested_amount': invested_amount,
+                'invested_amount': total_cost_basis,
+                'current_market_value': total_market_value,
                 'holdings': {k: v for k, v in holdings.items() if v > 0},
-                'total_return': total_return,
-                'num_positions': len([k for k, v in holdings.items() if v > 0])
+                'holdings_details': holdings_details,
+                'total_return': total_return_percent,
+                'total_return_dollars': total_return_dollars,
+                'num_positions': len(active_symbols)
             }
-            
+        
         except Exception as e:
             logger.error(f"Error calculating portfolio: {e}")
             return {
                 'total_value': self.config.INITIAL_CAPITAL,
                 'cash': self.config.INITIAL_CAPITAL,
                 'invested_amount': 0.0,
+                'current_market_value': 0.0,
                 'holdings': {},
+                'holdings_details': {},
                 'total_return': 0.0,
+                'total_return_dollars': 0.0,
                 'num_positions': 0
             }
     
@@ -167,7 +276,7 @@ class TwoStagePortfolioManager:
             logger.info(f"Trade executed: {action} {quantity} {symbol} @ ${price:.2f}")
             
             return True, f"Trade executed successfully: {action} {quantity} {symbol} @ ${price:.2f}"
-            
+        
         except Exception as e:
             logger.error(f"Error executing trade: {e}")
             return False, f"Trade execution error: {str(e)}"
@@ -186,7 +295,6 @@ def get_portfolio_manager() -> TwoStagePortfolioManager:
     if _portfolio_manager_instance is None:
         _portfolio_manager_instance = TwoStagePortfolioManager()
     return _portfolio_manager_instance
-
 
 # For backwards compatibility
 PortfolioManager = TwoStagePortfolioManager
