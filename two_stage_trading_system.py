@@ -43,7 +43,7 @@ from portfolio_manager import get_portfolio_manager
 
 class TwoStageMLTradingSystem:
     """
-    Main trading system with two-stage stock analysis (4000 → 50 → 10)
+    Main trading system with two-stage stock analysis 
     UPDATED: Enhanced portfolio tracking and recommendation display
     """
     
@@ -54,13 +54,13 @@ class TwoStageMLTradingSystem:
         self.ml_engine = get_two_stage_ml_engine()
         self.db_manager = get_db_manager()
         
-        logger.info("🚀 Two-Stage ML Trading System initialized (4000 → 50 → 10)")
+        logger.info("🚀 Two-Stage ML Trading System initialized ")
     
     async def run_two_stage_daily_update(self) -> None:
         """Run enhanced daily update with two-stage analysis"""
         try:
             start_time = time.time()
-            logger.info("🎯 Starting Two-Stage Daily Update (4000 → 50 → 10)...")
+            logger.info("🎯 Starting Two-Stage Daily Update ...")
             
             # Get current portfolio with live prices
             logger.info("📊 Fetching portfolio with live prices from Yahoo Finance...")
@@ -100,9 +100,9 @@ class TwoStageMLTradingSystem:
                             logger.info(f"✅ Simulated trade: {message}")
                         else:
                             logger.warning(f"❌ Trade simulation failed: {message}")
-                    elif rec['confidence'] >= self.config.MIN_CONFIDENCE_FOR_TRADE:
-                        logger.info(f"⚠️ Moderate confidence: {rec['symbol']} "
-                                  f"({rec['confidence']:.1%}) - manual review recommended")
+#                   elif rec['confidence'] >= self.config.MIN_CONFIDENCE_FOR_TRADE:
+#                       logger.info(f"⚠️ Moderate confidence: {rec['symbol']} "
+#                                 f"({rec['confidence']:.1%}) - manual review recommended")
                 except Exception as e:
                     logger.error(f"Error processing {rec['symbol']}: {e}")
             
@@ -340,7 +340,7 @@ class TwoStageMLTradingSystem:
                 print("\n" + "="*80)
                 print("🎯 TWO-STAGE ML TRADING SYSTEM")
                 print("="*80)
-                print("1. 🚀 Two-Stage Daily Update (4000 → 50 → 10)")
+                print("1. 🚀 Two-Stage Daily Update ")
                 print("2. 📊 Portfolio Summary (with Live Prices)")
                 print("3. 📝 Trade Logger")
                 print("4. 🧠 System Information")

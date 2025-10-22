@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Optional, List
 from pydantic_settings import BaseSettings
-from pydantic import validator
+from pydantic import BaseModel, field_validator
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -30,7 +30,7 @@ class TwoStageEnhancedConfig(BaseSettings):
     # ==========================================
     
     # Stage 1: Fast Screening (4000+ → 50)
-    STAGE1_TARGET_COUNT: int = 1000
+    STAGE1_TARGET_COUNT: int = 200
     STAGE1_MAX_MARKET_CAP: int = 50_000_000_000  # $50B max for screening
     STAGE1_MIN_VOLUME: int = 1_000_000  # 1M minimum volume
     STAGE1_MIN_PRICE: float = 1.00  # $1 minimum price
@@ -206,37 +206,37 @@ class TwoStageEnhancedConfig(BaseSettings):
     # VALIDATION RULES
     # ==========================================
     
-    @validator("PERPLEXITY_API_KEY")
+    @field_validator("PERPLEXITY_API_KEY")
     def validate_api_key(cls, v):
         if not v or v == "your_perplexity_api_key_here":
             raise ValueError("PERPLEXITY_API_KEY is required - please set it in your .env file")
         return v
     
-    @validator("INITIAL_CAPITAL")
+    @field_validator("INITIAL_CAPITAL")
     def validate_capital(cls, v):
         if v <= 0:
             raise ValueError("INITIAL_CAPITAL must be positive")
         return v
     
-    @validator("STAGE1_TARGET_COUNT")
+    @field_validator("STAGE1_TARGET_COUNT")
     def validate_stage1_target(cls, v):
         if v < 10 or v > 200:
             raise ValueError("STAGE1_TARGET_COUNT must be between 10 and 200")
         return v
     
-    @validator("STAGE2_TARGET_COUNT")
+    @field_validator("STAGE2_TARGET_COUNT")
     def validate_stage2_target(cls, v):
         if v < 5 or v > 50:
             raise ValueError("STAGE2_TARGET_COUNT must be between 5 and 50")
         return v
     
-    @validator("KELLY_FRACTION")
+    @field_validator("KELLY_FRACTION")
     def validate_kelly_fraction(cls, v):
         if v <= 0 or v > 1:
             raise ValueError("KELLY_FRACTION must be between 0 and 1")
         return v
     
-    @validator("CONFIDENCE_THRESHOLD")
+    @field_validator("CONFIDENCE_THRESHOLD")
     def validate_confidence_threshold(cls, v):
         if v <= 0 or v >= 1:
             raise ValueError("CONFIDENCE_THRESHOLD must be between 0 and 1")

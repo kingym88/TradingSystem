@@ -295,7 +295,7 @@ class TwoStageMLRecommendationEngine:
     async def _generate_two_stage_recommendations(self, max_recs: int) -> List[Dict[str, Any]]:
         """Generate recommendations using two-stage stock analysis"""
         try:
-            logger.info("🚀 Running two-stage stock analysis (4000 → 50 → 10)...")
+            logger.info("🚀 Running two-stage stock analysis...")
             
             # Run the two-stage analysis
             recommendations = await run_two_stage_stock_analysis()

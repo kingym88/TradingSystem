@@ -2,21 +2,21 @@
 echo "🚀 Enhanced ML AI Trading System - Mac Startup"
 echo "============================================="
 
-# Check if Python 3.12 is available
-if command -v python3.12 &> /dev/null; then
-    PYTHON_CMD=python3.12
-    echo "✅ Using Python 3.12"
+# Check if Python 3.13 is available
+if command -v python3.13 &> /dev/null; then
+    PYTHON_CMD=python3.13
+    echo "✅ Using Python 3.13"
 elif command -v python3 &> /dev/null; then
-    PYTHON_CMD=python3
+    PYTHON_CMD=python3.13
     echo "✅ Using Python 3"
 else
-    echo "❌ Python 3 not found. Please install Python 3.11"
+    echo "❌ Python 3 not found. Please install Python 3.13"
     exit 1
 fi
 
 # Check if virtual environment exists
 if [ ! -d "trading_env" ]; then
-    echo "Creating Python 3.12 virtual environment..."
+    echo "Creating Python 3.13 virtual environment..."
     $PYTHON_CMD -m venv trading_env
     source trading_env/bin/activate
     python -m pip install --upgrade pip
@@ -48,7 +48,7 @@ echo "  📝 Interactive Trade Logging"
 echo "  📅 Weekend Deep Analysis"
 echo "  ⚠️  Advanced Risk Management"
 echo ""
-$PYTHON_CMD enhanced_ml_trading_system.py
+$PYTHON_CMD two_stage_trading_system.py
 
 echo ""
 echo "System closed. Thanks for using Enhanced ML AI Trading System! 🚀"

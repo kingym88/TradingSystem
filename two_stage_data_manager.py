@@ -226,7 +226,7 @@ class FastScreeningEngine:
             batch = stocks[batch_idx:batch_idx + batch_size]
             batch_num = batch_idx // batch_size + 1
             
-            logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch)} stocks)")
+#           logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch)} stocks)")
             
             # Use ThreadPoolExecutor for parallel processing
             with ThreadPoolExecutor(max_workers=5) as executor:
@@ -338,10 +338,10 @@ class FastScreeningEngine:
         # Sort by score (highest first)
         scored_stocks.sort(key=lambda x: x.score, reverse=True)
         
-        logger.info(f"🏆 Stage 1c: Top 10 scores:")
-        for i, stock in enumerate(scored_stocks[:10], 1):
-            reasons_str = ", ".join(stock.reasons[:3])  # Top 3 reasons
-            logger.info(f"  {i}. {stock.symbol}: {stock.score:.1f} points ({reasons_str})")
+#        logger.info(f"🏆 Stage 1c: Top 10 scores:")
+#        for i, stock in enumerate(scored_stocks[:10], 1):
+#           reasons_str = ", ".join(stock.reasons[:3])  # Top 3 reasons
+#           logger.info(f"  {i}. {stock.symbol}: {stock.score:.1f} points ({reasons_str})")
         
         # Select top candidates
         top_candidates = [stock.symbol for stock in scored_stocks[:self.config.STAGE1_TARGET_COUNT]]
@@ -376,7 +376,7 @@ class DetailedAnalysisEngine:
             batch = symbols[batch_idx:batch_idx + batch_size]
             batch_num = batch_idx // batch_size + 1
             
-            logger.info(f"🔍 Analyzing batch {batch_num}/{total_batches} ({len(batch)} stocks)")
+#           logger.info(f"🔍 Analyzing batch {batch_num}/{total_batches} ({len(batch)} stocks)")
             
             # Process batch asynchronously
             batch_tasks = [self._analyze_single_stock_detailed(symbol) for symbol in batch]
@@ -659,11 +659,11 @@ class DetailedAnalysisEngine:
         # Sort by final score
         enhanced_stocks.sort(key=lambda x: x.final_score or 0, reverse=True)
         
-        logger.info(f"🏆 Stage 2b: Top {min(10, len(enhanced_stocks))} final scores:")
-        for i, stock in enumerate(enhanced_stocks[:10], 1):
-            logger.info(f"  {i}. {stock.symbol}: {stock.final_score:.2f} points "
-                       f"(RSI: {stock.rsi:.1f} if stock.rsi else 'N/A', "
-                       f"Price: ${stock.price:.2f})")
+#       logger.info(f"🏆 Stage 2b: Top {min(10, len(enhanced_stocks))} final scores:")
+#       for i, stock in enumerate(enhanced_stocks[:10], 1):
+#           logger.info(f"  {i}. {stock.symbol}: {stock.final_score:.2f} points "
+#                      f"(RSI: {stock.rsi:.1f} if stock.rsi else 'N/A', "
+#                      f"Price: ${stock.price:.2f})")
         
         # Select final recommendations
         final_recommendations = enhanced_stocks[:self.config.STAGE2_TARGET_COUNT]
@@ -680,13 +680,13 @@ class TwoStageDataManager:
         self.fast_screener = FastScreeningEngine()
         self.detailed_analyzer = DetailedAnalysisEngine()
         
-        logger.info("🚀 Two-Stage Data Manager initialized (4000 → 50 → 10)")
+        logger.info("🚀 Two-Stage Data Manager initialized")
     
     async def run_two_stage_analysis(self) -> List[Dict[str, Any]]:
         """Run complete two-stage analysis"""
         try:
             start_time = time.time()
-            logger.info("🎯 Starting Two-Stage Stock Analysis (4000 → 50 → 10)")
+            logger.info("🎯 Starting Two-Stage Stock Analysis")
             
             # Get all stocks from GitHub
             logger.info("📡 Fetching stock universe from GitHub...")
@@ -698,7 +698,7 @@ class TwoStageDataManager:
             
             logger.info(f"📊 Total stock universe: {len(all_stocks)} stocks")
             
-            # STAGE 1: Fast screening (4000 → 50)
+            # STAGE 1: Fast screening 
             logger.info("🚀 === STAGE 1: FAST SCREENING ===")
             
             # Apply basic filters
@@ -722,7 +722,7 @@ class TwoStageDataManager:
             stage1_time = time.time() - start_time
             logger.info(f"✅ Stage 1 completed in {stage1_time:.1f} seconds")
             
-            # STAGE 2: Detailed analysis (50 → 10)
+            # STAGE 2: Detailed analysis
             logger.info("🔬 === STAGE 2: DETAILED ANALYSIS ===")
             
             # Detailed analysis of top candidates
