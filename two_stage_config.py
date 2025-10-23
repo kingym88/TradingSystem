@@ -17,6 +17,14 @@ class TwoStageEnhancedConfig(BaseSettings):
     # API Configuration
     PERPLEXITY_API_KEY: str
     PERPLEXITY_BASE_URL: str = "https://api.perplexity.ai"
+    ENABLE_FUNDAMENTAL_ANALYSIS: bool = True
+    FUNDAMENTAL_ANALYSIS_MODEL: str = "sonar"
+    FUNDAMENTAL_ANALYSIS_TIMEOUT: int = 120
+    FUNDAMENTAL_ANALYSIS_WEIGHT: float = 0.3
+    # Updated ML Confidence Calculation
+    # Technical analysis: 40% weight
+    # Fundamental analysis: 30% weight  
+    # Momentum/liquidity: 30% weight
     
     # Enhanced API keys for alternative data
     ALPHA_VANTAGE_KEY: Optional[str] = None
@@ -39,7 +47,7 @@ class TwoStageEnhancedConfig(BaseSettings):
     STAGE1_PARALLEL_WORKERS: int = 5  # Parallel processing
     
     # Stage 2: Detailed Analysis (50 → 10)
-    STAGE2_TARGET_COUNT: int = 50
+    STAGE2_TARGET_COUNT: int = 5
     STAGE2_BATCH_SIZE: int = 50  # Smaller batches for detailed analysis
     STAGE2_ENABLE_SENTIMENT: bool = True
     STAGE2_ENABLE_ADVANCED_ML: bool = True

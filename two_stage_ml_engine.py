@@ -11,6 +11,7 @@ import asyncio
 warnings.filterwarnings('ignore')
 
 from loguru import logger
+from perplexity_fundamental_analyzer import get_fundamental_analyzer
 
 # Enhanced ML imports (with fallbacks)
 try:
@@ -144,7 +145,8 @@ class TwoStageMLRecommendationEngine:
         self.data_manager = get_two_stage_data_manager()
         self.portfolio_manager = get_portfolio_manager()
         self.bayesian_updater = TwoStageBayesianUpdater()
-        
+        self.fundamental_analyzer = get_fundamental_analyzer()
+
         # Model components
         self.ensemble_model = None
         self.last_training_date = None
@@ -293,49 +295,127 @@ class TwoStageMLRecommendationEngine:
             return []
     
     async def _generate_two_stage_recommendations(self, max_recs: int) -> List[Dict[str, Any]]:
-        """Generate recommendations using two-stage stock analysis"""
+        """Generate recommendations using two-stage stock analysis WITH FUNDAMENTAL ANALYSIS"""
         try:
             logger.info("🚀 Running two-stage stock analysis...")
-            
-            # Run the two-stage analysis
+
+            # Run the two-stage technical analysis
             recommendations = await run_two_stage_stock_analysis()
-            
+
             if not recommendations:
                 logger.warning("No recommendations from two-stage analysis")
                 return []
-            
+
+            # Select top candidates for fundamental analysis
+            top_candidates = recommendations[:max_recs]
+
+            # ==== NEW: PERPLEXITY FUNDAMENTAL ANALYSIS ====
+            logger.info(f"🔬 Running Perplexity fundamental analysis on top {len(top_candidates)} candidates...")
+
+            fundamental_results = {}
+            enable_fundamental = getattr(self.config, 'ENABLE_FUNDAMENTAL_ANALYSIS', True)
+
+            if enable_fundamental and self.fundamental_analyzer.client:
+                # Prepare stocks for batch analysis
+                stocks_to_analyze = [
+                    {'symbol': rec['symbol'], 'name': rec.get('company_name')} 
+                    for rec in top_candidates
+                ]
+
+                # Batch analyze with Perplexity
+                try:
+                    fundamental_results = await self.fundamental_analyzer.batch_analyze_stocks(stocks_to_analyze)
+                    logger.info(f"✅ Completed fundamental analysis for {len(fundamental_results)} stocks")
+                except Exception as e:
+                    logger.error(f"Error in batch fundamental analysis: {e}")
+            else:
+                if not enable_fundamental:
+                    logger.info("⚠️ Fundamental analysis disabled in config")
+                else:
+                    logger.warning("⚠️ Perplexity client not available - skipping fundamental analysis")
+
             # Apply ML enhancements to recommendations
             enhanced_recs = []
-            for rec in recommendations[:max_recs]:
+            for rec in top_candidates:
                 try:
-                    # Apply confidence boost from ML factors
+                    symbol = rec['symbol']
+
+                    # Get fundamental analysis for this stock
+                    fundamental_analysis = fundamental_results.get(symbol)
+
+                    # Calculate ML confidence boost
                     ml_confidence_boost = self._calculate_ml_confidence_boost(rec)
+
+                    # Calculate fundamental confidence boost (NEW)
+                    fundamental_boost = 0.0
+                    if fundamental_analysis:
+                        fundamental_boost = self.fundamental_analyzer.get_fundamental_boost(fundamental_analysis)
+                        logger.debug(f"{symbol}: Fundamental boost = {fundamental_boost:+.3f} "
+                                   f"(score: {fundamental_analysis.overall_score:.1f}/10)")
+
+                    # Combine boosts
+                    total_boost = ml_confidence_boost + fundamental_boost
+
                     original_confidence = rec.get('confidence', 0.7)
-                    boosted_confidence = min(0.95, original_confidence + ml_confidence_boost)
-                    
-                    # Update recommendation with ML enhancements
+                    boosted_confidence = min(0.95, max(0.5, original_confidence + total_boost))
+
+                    # Enhanced reasoning with fundamental insights
+                    enhanced_reasoning = rec.get('reasoning', 'Two-stage selection')
+
+                    if fundamental_analysis:
+                        # Add fundamental insights to reasoning
+                        if fundamental_analysis.recommendation:
+                            enhanced_reasoning += f" | Fundamental: {fundamental_analysis.recommendation}"
+                        if fundamental_analysis.overall_score >= 7.0:
+                            enhanced_reasoning += f" | Strong fundamentals (score: {fundamental_analysis.overall_score:.1f}/10)"
+                        elif fundamental_analysis.overall_score <= 4.0:
+                            enhanced_reasoning += f" | Weak fundamentals (score: {fundamental_analysis.overall_score:.1f}/10)"
+
+                        # Add top insight if available
+                        if fundamental_analysis.key_insights:
+                            top_insight = fundamental_analysis.key_insights[0][:80]
+                            enhanced_reasoning += f" | {top_insight}"
+
+                    # Update recommendation with ML and fundamental enhancements
                     enhanced_rec = rec.copy()
                     enhanced_rec.update({
                         'confidence': boosted_confidence,
                         'original_confidence': original_confidence,
                         'ml_confidence_boost': ml_confidence_boost,
-                        'source': 'Two-Stage ML',
+                        'fundamental_confidence_boost': fundamental_boost,
+                        'total_confidence_boost': total_boost,
+                        'source': 'Two-Stage ML + Fundamental',
+                        'reasoning': enhanced_reasoning,
                         'ml_features': {
                             'two_stage_score': rec.get('final_score', 0),
                             'technical_strength': self._assess_technical_strength(rec),
                             'liquidity_grade': self._assess_liquidity_grade(rec),
-                            'momentum_grade': self._assess_momentum_grade(rec)
-                        }
+                            'momentum_grade': self._assess_momentum_grade(rec),
+                            'fundamental_score': fundamental_analysis.overall_score if fundamental_analysis else None,
+                            'fundamental_recommendation': fundamental_analysis.recommendation if fundamental_analysis else None,
+                        },
+                        'fundamental_analysis': {
+                            'overall_score': fundamental_analysis.overall_score if fundamental_analysis else None,
+                            'financial_health_score': fundamental_analysis.financial_health_score if fundamental_analysis else None,
+                            'growth_score': fundamental_analysis.growth_score if fundamental_analysis else None,
+                            'competitive_score': fundamental_analysis.competitive_score if fundamental_analysis else None,
+                            'management_score': fundamental_analysis.management_score if fundamental_analysis else None,
+                            'industry_score': fundamental_analysis.industry_score if fundamental_analysis else None,
+                            'recommendation': fundamental_analysis.recommendation if fundamental_analysis else None,
+                            'key_insights': fundamental_analysis.key_insights if fundamental_analysis else [],
+                            'risks': fundamental_analysis.risks if fundamental_analysis else [],
+                            'catalysts': fundamental_analysis.catalysts if fundamental_analysis else [],
+                        } if fundamental_analysis else None
                     })
-                    
+
                     enhanced_recs.append(enhanced_rec)
-                
+
                 except Exception as e:
                     logger.error(f"Error enhancing recommendation for {rec.get('symbol', 'UNKNOWN')}: {e}")
                     enhanced_recs.append(rec)  # Use original if enhancement fails
-            
+
             return enhanced_recs
-        
+
         except Exception as e:
             logger.error(f"Error in two-stage recommendations: {e}")
             return []
