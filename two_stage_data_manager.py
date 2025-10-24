@@ -941,3 +941,45 @@ class EnhancedDataManager:
             logger.error(f"Error getting stock data for {symbol}: {e}")
             return None
 
+    def get_stage1_candidates(self) -> List[str]:
+        """
+        ADDED: Get Stage 1 candidates for market analysis
+        Wrapper method that runs Stage 1 filtering to get top candidates
+
+        Returns:
+            List of stock symbols that passed Stage 1 filtering
+        """
+        try:
+            logger.info("Running Stage 1 analysis for market screening...")
+
+            # Get all stocks from GitHub
+            all_stocks = self.two_stage_manager.github_manager.fetch_all_stocks()
+
+            if not all_stocks:
+                logger.warning("No stocks retrieved for Stage 1 analysis")
+                return []
+
+            # Apply basic filters
+            filtered_stocks = self.two_stage_manager.fast_screener.apply_basic_filters(all_stocks)
+
+            if not filtered_stocks:
+                logger.warning("No stocks passed basic filters")
+                return []
+
+            # Quick scoring
+            scored_stocks = self.two_stage_manager.fast_screener.quick_score_stocks(filtered_stocks)
+
+            if not scored_stocks:
+                logger.warning("No stocks could be scored")
+                return []
+
+            # Select top candidates
+            top_candidates = self.two_stage_manager.fast_screener.select_top_candidates(scored_stocks)
+
+            logger.info(f"Stage 1 complete: {len(top_candidates)} candidates selected")
+            return top_candidates
+
+        except Exception as e:
+            logger.error(f"Error in get_stage1_candidates: {e}")
+            return []
+
