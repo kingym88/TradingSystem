@@ -1,11 +1,12 @@
+# database.py
 """
 Database management system for AI Trading System
-UPDATED: Added helper methods for portfolio tracking
+UPDATED: Added get_recent_recommendations() method and enhanced functionality
 """
 from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, Boolean, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 import pandas as pd
 from loguru import logger
@@ -120,13 +121,59 @@ class DatabaseManager:
             logger.error(f"Error saving trade: {e}")
     
     def save_ai_recommendation(self, recommendation_data: Dict[str, Any]) -> None:
+        """Save AI recommendation to database"""
         try:
             with self.get_session() as session:
                 rec = AIRecommendation(**recommendation_data)
                 session.add(rec)
                 session.commit()
+                logger.debug(f"Saved recommendation for {recommendation_data.get('symbol')}")
         except Exception as e:
             logger.error(f"Error saving recommendation: {e}")
+    
+    def get_recent_recommendations(self, days: int = 7) -> List[Dict[str, Any]]:
+        """
+        ADDED: Get recent AI recommendations from the last N days
+        
+        Args:
+            days: Number of days to look back (default 7)
+            
+        Returns:
+            List of recommendation dictionaries
+        """
+        try:
+            cutoff_date = datetime.now() - timedelta(days=days)
+            
+            with self.get_session() as session:
+                recommendations = session.query(AIRecommendation).filter(
+                    AIRecommendation.timestamp >= cutoff_date
+                ).order_by(AIRecommendation.timestamp.desc()).all()
+                
+                # Convert to list of dictionaries
+                rec_list = []
+                for rec in recommendations:
+                    rec_dict = {
+                        'id': rec.id,
+                        'symbol': rec.symbol,
+                        'action': rec.action,
+                        'reasoning': rec.reasoning,
+                        'confidence': rec.confidence,
+                        'price_target': rec.price_target,
+                        'stop_loss': rec.stop_loss,
+                        'position_size': rec.position_size,
+                        'time_horizon': rec.time_horizon,
+                        'risk_level': rec.risk_level,
+                        'executed': rec.executed,
+                        'timestamp': rec.timestamp
+                    }
+                    rec_list.append(rec_dict)
+                
+                logger.info(f"Retrieved {len(rec_list)} recommendations from last {days} days")
+                return rec_list
+        
+        except Exception as e:
+            logger.error(f"Error getting recent recommendations: {e}")
+            return []
     
     def get_active_positions(self) -> List[Position]:
         try:
@@ -254,6 +301,20 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error updating trade portfolio value: {e}")
     
+    def mark_recommendation_as_executed(self, recommendation_id: int) -> None:
+        """
+        ADDED: Mark a recommendation as executed
+        """
+        try:
+            with self.get_session() as session:
+                rec = session.query(AIRecommendation).filter(AIRecommendation.id == recommendation_id).first()
+                if rec:
+                    rec.executed = True
+                    session.commit()
+                    logger.info(f"Marked recommendation {recommendation_id} as executed")
+        except Exception as e:
+            logger.error(f"Error marking recommendation as executed: {e}")
+    
     def calculate_performance_metrics(self) -> Dict[str, float]:
         return {'total_return': 0.0, 'sharpe_ratio': 0.0}
     
@@ -265,6 +326,7 @@ class DatabaseManager:
             return []
 
 
+# Singleton instance
 db_manager = DatabaseManager()
 
 
